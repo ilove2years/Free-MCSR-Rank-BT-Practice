@@ -90,7 +90,7 @@ variations_data = {
             "bastion:triple:3"
         ]
     },
-    "fortress": {  # 新增下界要塞分类
+    "fortress": {
         "fortress": [
             "biome:fortress:basalt_deltas",
             "biome:fortress:crimson_forest",
@@ -106,40 +106,34 @@ variations_data = {
             "end_tower:caged:front",
             "end_tower:caged:front_center"
         ],
-        "end_spawn": ["end_spawn:buried"]  # 实际需要数值，用文本框补充
+        "end_spawn": ["end_spawn:buried"]
     }
 }
 
 def fetch_seed(api_base, selected_overworld, selected_nether, selected_variations, completion_ms):
-    """
-    从API获取种子，支持多条件筛选
-    返回：(类型ID, 类型名称, 主世界种子, 下界种子, 可用种子数)
-    """
-    # 随机选择主世界类型
+    """从API获取种子，支持多条件筛选"""
     if not selected_overworld:
         overworld_choice = random.choice(list(overworld_types.keys()))
     else:
         overworld_choice = random.choice(selected_overworld)
-    
-    # 随机选择下界类型
+
     if selected_nether:
         nether_choice = random.choice(selected_nether)
     else:
         nether_choice = None
 
-    # 构建URL
     url = f"{api_base}/api/v2/seed?overworld={overworld_types[overworld_choice]}"
     if nether_choice:
         url += f"&nether={nether_choice}"
-    
+
     if selected_variations:
         allowed_vars = list(selected_variations)
         if allowed_vars:
             url += "&variations=" + ",".join(allowed_vars)
-    
+
     if completion_ms:
         url += f"&completion={completion_ms}"
-    
+
     try:
         response = requests.get(url, timeout=10)
         if response.status_code != 200:
@@ -149,8 +143,8 @@ def fetch_seed(api_base, selected_overworld, selected_nether, selected_variation
         if not data.get('success'):
             raise Exception(f"API返回错误：{data.get('message', '未知错误')}")
         seed_data = data['data']
-        return (overworld_choice, type_names[overworld_choice], 
-                seed_data['overworldSeed'], seed_data['netherSeed'], 
+        return (overworld_choice, type_names[overworld_choice],
+                seed_data['overworldSeed'], seed_data['netherSeed'],
                 seed_data.get('availableCounts', 0))
     except Exception as e:
         raise Exception(f"获取种子失败：{str(e)}")
@@ -163,10 +157,7 @@ def type_text(text, delay=0.01):
         time.sleep(delay)
 
 def task(api_base, seed_info, log_queue, stats_callback):
-    """
-    自动化任务函数
-    seed_info: (类型ID, 类型名称, 主世界种子, 下界种子)
-    """
+    """自动化任务函数"""
     try:
         chosen_type_id, type_name, owseed, netherseed = seed_info
         log_queue.put(f"使用预加载种子：类型 {type_name}，主世界 {owseed}，下界 {netherseed}")
@@ -216,13 +207,11 @@ class SeedToolGUI:
         self.root.geometry("1000x600")
         self.root.resizable(True, True)
 
-        # 配置文件路径
         if getattr(sys, 'frozen', False):
             self.config_path = os.path.join(os.path.dirname(sys.executable), 'config.json')
         else:
             self.config_path = 'config.json'
 
-        # 基础配置变量
         self.default_api = "http://43.143.231.104:8001"
         self.api_base = StringVar(value=self.default_api)
         self.selected_overworld = set()
@@ -236,25 +225,23 @@ class SeedToolGUI:
         self.listener = None
         self.log_queue = queue.Queue()
 
-        # 预加载相关
         self.prefetched_seed = None
         self.prefetch_lock = threading.Lock()
         self.prefetch_thread = None
         self.last_available_counts = 0
+        self.prefetch_fail_count = 0  # 失败计数
 
-        # 高级设置变量
         self.completion_min = StringVar(value="")
         self.completion_sec = StringVar(value="")
         self.variation_text = StringVar(value="")
 
-        # Elo权重变量
         self.use_elo = BooleanVar(value=False)
         self.elo_option = StringVar(value="1200+")
         self.custom_weights = {1: IntVar(value=20), 2: IntVar(value=20), 3: IntVar(value=20),
                                4: IntVar(value=20), 5: IntVar(value=20)}
         self.weight_total = IntVar(value=100)
+        self.weight_debounce_id = None  # 用于防抖
 
-        # 创建界面组件
         self.create_main_layout()
         self.load_config()
         self.process_log_queue()
@@ -291,7 +278,7 @@ class SeedToolGUI:
     def create_control_panels(self):
         parent = self.left_interior
 
-        # ---------- API设置（新增自动恢复默认功能）----------
+        # API设置
         frame_api = LabelFrame(parent, text="API设置", padx=5, pady=5)
         frame_api.pack(fill="x", padx=10, pady=5)
         Label(frame_api, text="API地址:").grid(row=0, column=0, sticky=W)
@@ -299,7 +286,6 @@ class SeedToolGUI:
         self.api_entry.grid(row=0, column=1, padx=5)
         Label(frame_api, text="默认: http://43.143.231.104:8001", fg="gray").grid(row=1, column=0, columnspan=2, sticky=W)
 
-        # 绑定事件：当输入框内容变化时，如果为空则恢复默认地址
         def on_api_entry_change(event=None):
             current = self.api_base.get().strip()
             if not current:
@@ -396,7 +382,7 @@ class SeedToolGUI:
         self.frame_toolbox.pack(fill="x", padx=10, pady=5)
         self.frame_toolbox.pack_forget()
 
-        # ---------- 底部红色警告文字 ----------
+        # 底部警告
         warning_frame = Frame(parent)
         warning_frame.pack(fill="x", padx=10, pady=10)
         warning_label = Label(warning_frame, text="⚠ 切勿在非游戏主界面处按下启动热键，否则可能会出现很严重的后果。",
@@ -415,7 +401,6 @@ class SeedToolGUI:
 
     def create_advanced_panel(self):
         self.var_checkboxes = {}
-        # 下界堡垒类型
         frame_nether = LabelFrame(self.frame_advanced, text="下界堡垒类型（可多选）", padx=5, pady=5)
         frame_nether.pack(fill="x", pady=2)
         self.nether_vars = {}
@@ -425,41 +410,34 @@ class SeedToolGUI:
             cb.grid(row=0, column=i, padx=5)
             self.nether_vars[key] = var
 
-        # 变种选择（使用Notebook分页）- 新增 fortress 页
         frame_variations = LabelFrame(self.frame_advanced, text="变种（仅当对应主世界/下界被选中时生效）", padx=5, pady=5)
         frame_variations.pack(fill="both", expand=True, pady=2)
 
         self.var_notebook = ttk.Notebook(frame_variations)
         self.var_notebook.pack(fill="both", expand=True)
 
-        # 主世界变种
         self.overworld_var_frame = Frame(self.var_notebook)
         self.var_notebook.add(self.overworld_var_frame, text="主世界")
         self.create_variation_group(self.overworld_var_frame, "overworld")
 
-        # 下界堡垒变种
         self.bastion_var_frame = Frame(self.var_notebook)
         self.var_notebook.add(self.bastion_var_frame, text="下界堡垒")
         self.create_variation_group(self.bastion_var_frame, "bastion")
 
-        # 下界要塞变种（新增）
         self.fortress_var_frame = Frame(self.var_notebook)
         self.var_notebook.add(self.fortress_var_frame, text="下界要塞")
         self.create_variation_group(self.fortress_var_frame, "fortress")
 
-        # 末地变种
         self.end_var_frame = Frame(self.var_notebook)
         self.var_notebook.add(self.end_var_frame, text="末地")
         self.create_variation_group(self.end_var_frame, "end")
 
-        # 备用文本框（用于无法通过复选框输入的变种，如数值）
         frame_extra = Frame(frame_variations)
         frame_extra.pack(fill="x", pady=2)
         Label(frame_extra, text="其他变种（逗号分隔）:").pack(side=LEFT)
         Entry(frame_extra, textvariable=self.variation_text, width=40).pack(side=LEFT, padx=5)
         Button(frame_extra, text="清除", command=lambda: self.variation_text.set("")).pack(side=LEFT)
 
-        # 完成时间
         frame_time = LabelFrame(self.frame_advanced, text="完成时间上限（留空表示不限制）", padx=5, pady=5)
         frame_time.pack(fill="x", pady=2)
         Label(frame_time, text="分钟:").grid(row=0, column=0)
@@ -497,11 +475,9 @@ class SeedToolGUI:
         frame = Frame(self.frame_toolbox)
         frame.pack(fill="x", pady=5, padx=5)
 
-        # 先创建结果文本变量
         self.match_result_text = StringVar()
         self.match_result_text.set("")
 
-        # 第一行：输入框和查询按钮
         row1 = Frame(frame)
         row1.pack(fill="x", pady=2)
         Label(row1, text="比赛ID:").pack(side=LEFT)
@@ -509,13 +485,10 @@ class SeedToolGUI:
         self.match_id_entry.pack(side=LEFT, padx=5)
         Button(row1, text="查询", command=self.query_match).pack(side=LEFT)
 
-        # 第二行：结果显示区域（使用Message自动换行）
         self.match_result_message = Message(frame, textvariable=self.match_result_text, width=300, justify=LEFT, fg="blue")
         self.match_result_message.pack(fill="x", pady=5)
 
-        # 第三行：导入按钮
         Button(frame, text="导入到基本界面", command=self.import_match).pack(pady=5)
-        # 添加红色提示文字
         warning_label = Label(frame, text="注意：因种子值查询失败，仅导入结构和变种，可能导致筛选条件过于严格。若预加载报错，请检查高级设置。",
                               fg="red", wraplength=280, justify=LEFT)
         warning_label.pack(pady=5)
@@ -528,14 +501,12 @@ class SeedToolGUI:
 
     def update_elo_state(self):
         enabled = self.use_elo.get()
-        # 基础类型复选框禁用/启用
         for var in self.type_vars.values():
             if enabled:
                 var.set(0)
         for cb in self.frame_type.winfo_children():
             if isinstance(cb, Checkbutton):
                 cb.config(state=DISABLED if enabled else NORMAL)
-        # 随机复选框
         for cb in self.frame_type.winfo_children():
             if isinstance(cb, Checkbutton) and cb.cget("text") == "随机":
                 cb.config(state=DISABLED if enabled else NORMAL)
@@ -556,10 +527,10 @@ class SeedToolGUI:
             weights = {1:20, 2:20, 3:20, 4:20, 5:20}
             self.custom_frame.grid_remove()
         elif option == "600-1200":
-            weights = {1:30, 2:25, 3:25, 4:20, 5:0}
+            weights = {1:0, 2:20, 3:25, 4:30, 5:25}
             self.custom_frame.grid_remove()
         elif option == "0-599":
-            weights = {1:55, 2:15, 3:30, 4:0, 5:0}
+            weights = {1:0, 2:0, 3:30, 4:55, 5:15}  # 宝藏废门权重为0
             self.custom_frame.grid_remove()
         else:  # 自定义
             self.custom_frame.grid()
@@ -574,8 +545,15 @@ class SeedToolGUI:
 
     def on_weight_slider_change(self, value):
         self.update_weight_total()
+        # 防抖：延迟0.5秒后保存和预加载
+        if self.weight_debounce_id:
+            self.root.after_cancel(self.weight_debounce_id)
+        self.weight_debounce_id = self.root.after(500, self._delayed_weight_action)
+
+    def _delayed_weight_action(self):
         self.save_config()
         self.trigger_prefetch()
+        self.weight_debounce_id = None
 
     def balance_weights(self):
         total = sum(self.custom_weights[tid].get() for tid in range(1,6))
@@ -674,13 +652,14 @@ class SeedToolGUI:
                 self.frame_advanced.pack_forget()
                 self.btn_advanced.config(text="▼ 高级设置")
 
-    # ---------- 预加载 ----------
+    # ---------- 预加载（改进版：失败计数和退避）----------
     def trigger_prefetch(self):
         with self.prefetch_lock:
             if self.prefetch_thread and self.prefetch_thread.is_alive():
                 self.log_queue.put("预加载正在进行，稍后重新尝试...")
-                self.root.after(1000, self.trigger_prefetch)
+                self.root.after(3000, self.trigger_prefetch)
                 return
+            self.prefetch_fail_count = 0
             self.prefetch_thread = threading.Thread(target=self._prefetch_worker, daemon=True)
             self.prefetch_thread.start()
 
@@ -688,27 +667,25 @@ class SeedToolGUI:
         self.root.after(0, lambda: self.prefetch_label.config(text="预加载状态：正在获取...", fg="orange"))
         api_base = self.api_base.get().rstrip('/')
 
+        # 根据Elo确定主世界类型列表
         if self.use_elo.get():
             option = self.elo_option.get()
             if option == "自定义":
+                # 自定义权重：仅选择权重 > 0 的类型
                 possible_types = [tid for tid in range(1,6) if self.custom_weights[tid].get() > 0]
                 if possible_types:
                     weights = [self.custom_weights[tid].get() for tid in possible_types]
                     overworld_choice = random.choices(possible_types, weights=weights)[0]
                     selected_overworld_list = [overworld_choice]
                 else:
+                    # 所有权重为0，则从全部类型随机
                     selected_overworld_list = list(range(1,6))
             else:
-                weights_map = {
-                    "1200+": {1:20,2:20,3:20,4:20,5:20},
-                    "600-1200": {1:30,2:25,3:25,4:20,5:0},
-                    "0-599": {1:55,2:15,3:30,4:0,5:0}
-                }
-                weights = weights_map[option]
-                possible_types = [tid for tid in range(1,6) if weights[tid] > 0]
+                # 预设权重：直接使用 self.custom_weights 中的值
+                possible_types = [tid for tid in range(1,6) if self.custom_weights[tid].get() > 0]
                 if possible_types:
-                    wlist = [weights[tid] for tid in possible_types]
-                    overworld_choice = random.choices(possible_types, weights=wlist)[0]
+                    weights = [self.custom_weights[tid].get() for tid in possible_types]
+                    overworld_choice = random.choices(possible_types, weights=weights)[0]
                     selected_overworld_list = [overworld_choice]
                 else:
                     selected_overworld_list = list(range(1,6))
@@ -737,17 +714,24 @@ class SeedToolGUI:
             self.root.after(0, lambda: self.prefetch_label.config(
                 text=f"预加载状态：就绪 ({tname})", fg="green"))
             self.log_queue.put(f"预加载成功：{tname} - {ow} (可用:{avail})")
+            self.prefetch_fail_count = 0
         except Exception as e:
+            self.prefetch_fail_count += 1
             self.root.after(0, lambda: self.prefetch_label.config(text="预加载状态：失败", fg="red"))
             self.log_queue.put(f"预加载失败：{str(e)}")
             self.log_queue.put(traceback.format_exc())
+            if self.prefetch_fail_count >= 3:
+                self.log_queue.put("预加载连续失败多次，请检查筛选条件或网络")
+            else:
+                # 延迟5秒后重试
+                self.root.after(5000, self.trigger_prefetch)
 
     def update_display_with_seed(self, type_name, owseed, netherseed):
         self.info_text.set(
             f"类型：{type_name}\n主世界种子：{owseed}\n下界种子：{netherseed}"
         )
 
-    # ---------- 百宝箱查询（改进版）----------
+    # ---------- 百宝箱查询 ----------
     def query_match(self):
         match_id = self.match_id_entry.get().strip()
         if not match_id.isdigit():
@@ -756,7 +740,6 @@ class SeedToolGUI:
             return
 
         api_base = self.api_base.get().rstrip('/')
-        # 先尝试获取种子值
         url = f"{api_base}/api/v2/seed/{match_id}"
         self.log_queue.put(f"正在请求种子值：{url}")
 
@@ -781,7 +764,6 @@ class SeedToolGUI:
         except Exception as e:
             self.log_queue.put(f"请求种子值异常：{str(e)}")
 
-        # 再尝试获取详细信息（类型和变种）
         url_info = f"{api_base}/api/v2/seedinfo/{match_id}"
         self.log_queue.put(f"正在请求详细信息：{url_info}")
 
@@ -799,12 +781,11 @@ class SeedToolGUI:
                     overworld_type = data_info['data'].get('overworld', '未知')
                     nether_type = data_info['data'].get('nether', '未知')
                     raw_variations = data_info['data'].get('variations', [])
-                    # 处理 variations 可能为字符串的情况
                     if isinstance(raw_variations, str):
                         try:
                             variations = json.loads(raw_variations)
                         except:
-                            variations = [raw_variations]  # 如果解析失败，作为单个字符串列表
+                            variations = [raw_variations]
                     elif isinstance(raw_variations, list):
                         variations = raw_variations
                     else:
@@ -817,7 +798,6 @@ class SeedToolGUI:
         except Exception as e:
             self.log_queue.put(f"请求详细信息异常：{str(e)}")
 
-        # 保存结果
         self.match_result = {
             'overworld_type': overworld_type,
             'nether_type': nether_type,
@@ -826,13 +806,11 @@ class SeedToolGUI:
             'netherseed': netherseed
         }
 
-        # 构造显示文本
         if seed_success:
             seed_display = f"{owseed} / {netherseed}"
         else:
             seed_display = "获取失败（服务器错误）"
 
-        # 格式化变种显示
         if variations:
             if isinstance(variations, list):
                 var_display = ', '.join(str(v) for v in variations)
@@ -874,7 +852,6 @@ class SeedToolGUI:
             self.nether_vars[nether_type].set(1)
         variations = self.match_result.get('variations', [])
         if variations:
-            # 将变种列表转换为逗号分隔的字符串填入文本框
             if isinstance(variations, list):
                 var_str = ','.join(str(v) for v in variations)
             else:
@@ -1034,6 +1011,7 @@ class SeedToolGUI:
             else:
                 self.log_queue.put("没有预加载种子，将实时获取...")
                 try:
+                    # 实时获取逻辑，与预加载一致
                     if self.use_elo.get():
                         option = self.elo_option.get()
                         if option == "自定义":
@@ -1045,16 +1023,10 @@ class SeedToolGUI:
                             else:
                                 selected_overworld = list(range(1,6))
                         else:
-                            weights_map = {
-                                "1200+": {1:20,2:20,3:20,4:20,5:20},
-                                "600-1200": {1:30,2:25,3:25,4:20,5:0},
-                                "0-599": {1:55,2:15,3:30,4:0,5:0}
-                            }
-                            weights = weights_map[option]
-                            possible_types = [tid for tid in range(1,6) if weights[tid] > 0]
+                            possible_types = [tid for tid in range(1,6) if self.custom_weights[tid].get() > 0]
                             if possible_types:
-                                wlist = [weights[tid] for tid in possible_types]
-                                overworld_choice = random.choices(possible_types, weights=wlist)[0]
+                                weights = [self.custom_weights[tid].get() for tid in possible_types]
+                                overworld_choice = random.choices(possible_types, weights=weights)[0]
                                 selected_overworld = [overworld_choice]
                             else:
                                 selected_overworld = list(range(1,6))
